@@ -297,6 +297,15 @@ input[type=range]{accent-color:var(--focus)}
           </div>
         </div>
         <div class="sec">
+          <h4>Walls <span class="ln"></span></h4>
+          <div id="wallList"></div>
+          <div class="addrow">
+            <input type="text" id="wallName" placeholder="e.g. Concrete">
+            <input type="color" id="wallColor" value="#5b6577">
+            <button class="add" id="wallAdd">＋</button>
+          </div>
+        </div>
+        <div class="sec">
           <h4>Props / Furniture / Traps <span class="ln"></span></h4>
           <div id="propList"></div>
           <div class="addrow">
@@ -343,8 +352,7 @@ input[type=range]{accent-color:var(--focus)}
           <div class="hint">👁 show/hide · 🔒 lock (locked layers can't be edited, selected, or erased). Want a structure-only pass? Lock <b>Props/Ghosts/Paths</b> and build <b>Walls + Rooms</b> freely.</div>
         </div>
         <div class="sec">
-          <h4>Walls &amp; Labels <span class="ln"></span></h4>
-          <div class="crow"><label>Wall color</label><input type="color" id="wallColor" value="#5b6577"></div>
+          <h4>Labels <span class="ln"></span></h4>
           <div class="crow"><label>Room label color</label><input type="color" id="labelColor" value="#ffffff"></div>
           <div class="field"><label>Room label size</label><div class="rng"><input type="range" id="labelSize" min="9" max="26" value="14"><span class="val" id="labelSizeV">14</span></div></div>
           <div class="crow"><label>Label font</label>
@@ -443,6 +451,10 @@ function defaultState(){return{
   opts:{grid:true,labels:true,wpnums:true,legend:true},
   layers:{zones:{vis:true,lock:false},walls:{vis:true,lock:false},props:{vis:true,lock:false},
           ghosts:{vis:true,lock:false},paths:{vis:true,lock:false},player:{vis:true,lock:false}},
+  wallTypes:[
+    {id:'w_solid',name:'Solid Wall',color:'#5b6577'},
+    {id:'w_brick',name:'Brick Wall',color:'#7a4a32'},
+    {id:'w_glass',name:'Glass Wall',color:'#5b9ec9'}],
   zoneTypes:[
     {id:'z_living',name:'Living Room',color:'#cdbd72'},{id:'z_kitchen',name:'Kitchen',color:'#9c8b66'},
     {id:'z_bath',name:'Bathroom',color:'#3fa86a'},{id:'z_bed1',name:'Bedroom 1',color:'#cf7a34'},
@@ -519,7 +531,7 @@ function updatePaintbar(){
     // current target
     const ct=$('#curTarget');
     if(tool==='zone'){const z=S.zoneTypes.find(z=>z.id===curZone);ct.innerHTML=z?`<span class="sw" style="background:${z.color}"></span>${z.name}`:'<span style="color:var(--mute)">pick a room →</span>';}
-    else if(tool==='wall'){ct.innerHTML=`<span class="sw" style="background:${S.wallColor}"></span>Wall`;}
+    else if(tool==='wall'){const wt=S.wallTypes&&S.wallTypes.find(w=>w.id===curWall);ct.innerHTML=wt?`<span class="sw" style="background:${wt.color}"></span>${wt.name}`:'<span style="color:var(--mute)">pick a wall →</span>';}
     else ct.innerHTML='<span style="color:var(--red)">Erasing</span>';
   } else pb.classList.add('hidden');
 }
@@ -527,7 +539,7 @@ $$('#modeSeg button').forEach(b=>b.onclick=()=>{paintMode=b.dataset.m;updatePain
 $('#brushSz').oninput=e=>{brushSize=+e.target.value;$('#brushSzV').textContent=brushSize;};
 
 /* selection / current */
-let sel=null, activePathId=null, curZone=null, curPlace=null;
+let sel=null, activePathId=null, curZone=null, curWall=null, curPlace=null;
 
 /* ---------------- UNDO ---------------- */
 let undoStack=[],redoStack=[];
@@ -561,7 +573,8 @@ function draw(){
     const zt=S.zoneTypes.find(z=>z.id===S.zones[k]);if(!zt)continue;ctx.fillStyle=hexA(zt.color,.85);ctx.fillRect(cx*CELL,cy*CELL,CELL,CELL);}}
   // walls
   if(L('walls').vis){for(const k in S.walls){const[cx,cy]=k.split(',').map(Number);if(cx<vx0||cx>vx1||cy<vy0||cy>vy1)continue;
-    ctx.fillStyle=S.wallColor;ctx.fillRect(cx*CELL,cy*CELL,CELL,CELL);
+    const _wt=S.wallTypes&&S.wallTypes.find(w=>w.id===S.walls[k]);
+    ctx.fillStyle=_wt?_wt.color:S.wallColor;ctx.fillRect(cx*CELL,cy*CELL,CELL,CELL);
     ctx.fillStyle='rgba(0,0,0,.25)';ctx.fillRect(cx*CELL,cy*CELL,CELL,2);ctx.fillRect(cx*CELL,cy*CELL,2,CELL);}}
   // grid
   if(S.opts.grid&&cam.scale>0.12){ctx.lineWidth=1/cam.scale;ctx.strokeStyle='rgba(255,255,255,.05)';ctx.beginPath();
@@ -579,7 +592,7 @@ function draw(){
   if(painting&&paintMode!=='brush'&&paintStart&&paintCur){
     const cells=computePaintCells();
     let col=tool==='zone'?(curZone?hexA((S.zoneTypes.find(z=>z.id===curZone)||{}).color||'#888',.5):'rgba(120,120,120,.4)'):
-            tool==='wall'?hexA(S.wallColor,.6):'rgba(244,135,113,.4)';
+            tool==='wall'?hexA((S.wallTypes&&S.wallTypes.find(w=>w.id===curWall)||{color:S.wallColor}).color,.6):'rgba(244,135,113,.4)';
     ctx.fillStyle=col;cells.forEach(c=>{if(c.cx>=0&&c.cy>=0&&c.cx<S.gw&&c.cy<S.gh)ctx.fillRect(c.cx*CELL,c.cy*CELL,CELL,CELL);});
   }
   // hover
@@ -657,7 +670,7 @@ function computePaintCells(){if(!paintStart||!paintCur)return[];
 function applyCells(cells){cells.forEach(({cx,cy})=>{
   if(cx<0||cy<0||cx>=S.gw||cy>=S.gh)return;const k=cx+','+cy;
   if(tool==='zone'){if(L('zones').lock||!curZone)return;S.zones[k]=curZone;if(!L('walls').lock)delete S.walls[k];}
-  else if(tool==='wall'){if(L('walls').lock)return;S.walls[k]=1;if(!L('zones').lock)delete S.zones[k];}
+  else if(tool==='wall'){if(L('walls').lock||!curWall)return;S.walls[k]=curWall;if(!L('zones').lock)delete S.zones[k];}
   else if(tool==='erase'){
     if(!L('zones').lock)delete S.zones[k];
     if(!L('walls').lock)delete S.walls[k];
@@ -773,6 +786,11 @@ function refreshLists(){
     el.onclick=ev=>{if(ev.target.classList.contains('x'))return;curZone=z.id;setTool('zone');refreshLists();};
     el.querySelector('.x').onclick=()=>{pushUndo();S.zoneTypes=S.zoneTypes.filter(x=>x.id!==z.id);if(curZone===z.id)curZone=null;refreshLists();};zl.appendChild(el);});
   if(!S.zoneTypes.length)zl.innerHTML='<div class="empty">No zones yet.</div>';
+  const wl=$('#wallList');wl.innerHTML='';
+  S.wallTypes.forEach(w=>{const el=chip(w.color,false,w.name,'',curWall===w.id);
+    el.onclick=ev=>{if(ev.target.classList.contains('x'))return;curWall=w.id;setTool('wall');refreshLists();};
+    el.querySelector('.x').onclick=()=>{pushUndo();S.wallTypes=S.wallTypes.filter(x=>x.id!==w.id);if(curWall===w.id)curWall=null;refreshLists();draw();};wl.appendChild(el);});
+  if(!S.wallTypes.length)wl.innerHTML='<div class="empty">No wall types yet.</div>';
   const pl=$('#propList');pl.innerHTML='';
   S.propTypes.forEach(p=>{const s0=curPlace&&curPlace.kind==='prop'&&curPlace.typeId===p.id;const el=chip(p.color,false,p.name,p.shape,s0);
     el.onclick=ev=>{if(ev.target.classList.contains('x'))return;curPlace={kind:'prop',typeId:p.id};setTool('icon');refreshLists();};
@@ -790,11 +808,12 @@ function refreshLists(){
   if(!S.paths.length)ptl.innerHTML='<div class="empty">No paths yet.</div>';
   updatePaintbar();updStatus();
 }
+$('#wallAdd').onclick=()=>{const n=$('#wallName').value.trim();if(!n)return;pushUndo();S.wallTypes.push({id:uid('w'),name:n,color:$('#wallColor').value});$('#wallName').value='';refreshLists();};
 $('#zoneAdd').onclick=()=>{const n=$('#zoneName').value.trim();if(!n)return;pushUndo();S.zoneTypes.push({id:uid('z'),name:n,color:$('#zoneColor').value});$('#zoneName').value='';refreshLists();};
 $('#propAdd').onclick=()=>{const n=$('#propName').value.trim();if(!n)return;pushUndo();S.propTypes.push({id:uid('p'),name:n,color:$('#propColor').value,shape:$('#propShape').value});$('#propName').value='';refreshLists();};
 $('#ghostAdd').onclick=()=>{const n=$('#ghostName').value.trim();if(!n)return;pushUndo();S.ghostTypes.push({id:uid('g'),name:n,color:$('#ghostColor').value});$('#ghostName').value='';refreshLists();};
 $('#pathAdd').onclick=()=>{const n=$('#pathName').value.trim()||('Path '+(S.paths.length+1));pushUndo();const p={id:uid('pa'),name:n,color:$('#pathColor').value,beh:$('#pathBeh').value,points:[]};S.paths.push(p);activePathId=p.id;setTool('path');$('#pathName').value='';refreshLists();toast('Path "'+n+'" active — click map');};
-[['zoneName','zoneAdd'],['propName','propAdd'],['ghostName','ghostAdd'],['pathName','pathAdd']].forEach(([i,b])=>$('#'+i).addEventListener('keydown',e=>{if(e.key==='Enter')$('#'+b).click();}));
+[['wallName','wallAdd'],['zoneName','zoneAdd'],['propName','propAdd'],['ghostName','ghostAdd'],['pathName','pathAdd']].forEach(([i,b])=>$('#'+i).addEventListener('keydown',e=>{if(e.key==='Enter')$('#'+b).click();}));
 
 /* ---------------- LAYERS UI ---------------- */
 const EYE=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
@@ -843,7 +862,7 @@ function updStatus(){
 /* ---------------- SETTINGS BINDINGS ---------------- */
 function syncUI(){
   $('#levelName').value=S.name;$('#gw').value=S.gw;$('#gh').value=S.gh;syncPreset();
-  $('#wallColor').value=S.wallColor;$('#labelColor').value=S.labelColor;$('#labelSize').value=S.labelSize;$('#labelSizeV').textContent=S.labelSize;$('#labelFont').value=S.labelFont;
+  $('#labelColor').value=S.labelColor;$('#labelSize').value=S.labelSize;$('#labelSizeV').textContent=S.labelSize;$('#labelFont').value=S.labelFont;
   $('#pcw').value=S.player.w;$('#pch').value=S.player.h;$('#showPlayer').checked=S.player.show;
   $('#optGrid').checked=S.opts.grid;$('#optLabels').checked=S.opts.labels;$('#optWaypointNums').checked=S.opts.wpnums;$('#optLegend').checked=S.opts.legend;
   refreshLists();buildLayers();syncInspect();
@@ -853,7 +872,6 @@ $('#levelName').oninput=e=>S.name=e.target.value;
 $('#gw').onchange=e=>{pushUndo();S.gw=clamp(+e.target.value,4,400);syncPreset();fitView();draw();};
 $('#gh').onchange=e=>{pushUndo();S.gh=clamp(+e.target.value,4,400);syncPreset();fitView();draw();};
 $('#preset').onchange=e=>{if(!e.target.value)return;const[w,h]=e.target.value.split(',').map(Number);pushUndo();S.gw=w;S.gh=h;$('#gw').value=w;$('#gh').value=h;fitView();draw();};
-$('#wallColor').oninput=e=>{S.wallColor=e.target.value;updatePaintbar();draw();};
 $('#labelColor').oninput=e=>{S.labelColor=e.target.value;draw();};
 $('#labelSize').oninput=e=>{S.labelSize=+e.target.value;$('#labelSizeV').textContent=S.labelSize;draw();};
 $('#labelFont').onchange=e=>{S.labelFont=e.target.value;draw();};
@@ -880,7 +898,10 @@ $('#btnLoad').onclick=()=>$('#fileInput').click();
 $('#fileInput').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{loadState(JSON.parse(r.result));toast('Loaded '+f.name);}catch(err){toast('⚠ Invalid file');}};r.readAsText(f);e.target.value='';};
 function loadState(o){const d=defaultState();S=Object.assign(d,o);
   S.zones=o.zones||{};S.walls=o.walls||{};S.icons=o.icons||[];S.paths=o.paths||[];
+  S.wallTypes=o.wallTypes||d.wallTypes;
   S.zoneTypes=o.zoneTypes||d.zoneTypes;S.propTypes=o.propTypes||d.propTypes;S.ghostTypes=o.ghostTypes||d.ghostTypes;
+  // migrate old saves where walls[k] was 1 (boolean) → first wall type id
+  if(S.wallTypes.length){const fid=S.wallTypes[0].id;for(const k in S.walls){if(S.walls[k]===1||S.walls[k]===true)S.walls[k]=fid;}}
   S.player=Object.assign({x:34,y:18,w:1,h:1.5,show:true},o.player||{});
   S.opts=Object.assign({grid:true,labels:true,wpnums:true,legend:true},o.opts||{});
   S.layers=Object.assign(JSON.parse(JSON.stringify(d.layers)),o.layers||{});
@@ -906,7 +927,7 @@ $('#btnPng').onclick=()=>{
 function renderBoard(o){const lw=S.gw*CELL,lh=S.gh*CELL;
   o.fillStyle='#121316';o.fillRect(0,0,lw,lh);
   if(L('zones').vis)for(const k in S.zones){const[cx,cy]=k.split(',').map(Number);const zt=S.zoneTypes.find(z=>z.id===S.zones[k]);if(!zt)continue;o.fillStyle=hexA(zt.color,.86);o.fillRect(cx*CELL,cy*CELL,CELL,CELL);}
-  if(L('walls').vis)for(const k in S.walls){const[cx,cy]=k.split(',').map(Number);o.fillStyle=S.wallColor;o.fillRect(cx*CELL,cy*CELL,CELL,CELL);o.fillStyle='rgba(0,0,0,.25)';o.fillRect(cx*CELL,cy*CELL,CELL,2);o.fillRect(cx*CELL,cy*CELL,2,CELL);}
+  if(L('walls').vis)for(const k in S.walls){const[cx,cy]=k.split(',').map(Number);const _wt=S.wallTypes&&S.wallTypes.find(w=>w.id===S.walls[k]);o.fillStyle=_wt?_wt.color:S.wallColor;o.fillRect(cx*CELL,cy*CELL,CELL,CELL);o.fillStyle='rgba(0,0,0,.25)';o.fillRect(cx*CELL,cy*CELL,CELL,2);o.fillRect(cx*CELL,cy*CELL,2,CELL);}
   if(S.opts.grid){o.lineWidth=1;o.strokeStyle='rgba(255,255,255,.05)';o.beginPath();for(let x=0;x<=S.gw;x++){o.moveTo(x*CELL,0);o.lineTo(x*CELL,lh);}for(let y=0;y<=S.gh;y++){o.moveTo(0,y*CELL);o.lineTo(lw,y*CELL);}o.stroke();}
   o.lineWidth=3;o.strokeStyle='#3e3e42';o.strokeRect(0,0,lw,lh);
   if(S.opts.labels&&L('zones').vis)renderLabels(o);
@@ -931,6 +952,7 @@ function drawLegend(o,x,y,w){o.textAlign='left';o.textBaseline='middle';let cy=y
   const row=(color,shape,name,meta,round)=>{const r=8;if(shape){shapePath(o,shape,x+10,cy,r);o.fillStyle=color;o.fill();o.lineWidth=1.5;o.strokeStyle='#121316';o.stroke();}else{o.fillStyle=color;if(round){o.beginPath();o.arc(x+10,cy,r,0,7);o.fill();}else o.fillRect(x+10-r,cy-r,r*2,r*2);}
     o.fillStyle='#d4d4d4';o.font='600 12px '+FF.ui;o.fillText(name,x+28,cy);if(meta){o.fillStyle='#6e7681';o.font='400 10px '+FF.mono;o.textAlign='right';o.fillText(meta,x+w,cy);o.textAlign='left';}cy+=24;};
   const uz=new Set(Object.values(S.zones));if(uz.size&&L('zones').vis){head('Rooms');S.zoneTypes.filter(z=>uz.has(z.id)).forEach(z=>row(z.color,'square',z.name));}
+  const uw=new Set(Object.values(S.walls));if(uw.size&&L('walls').vis){cy+=4;head('Walls');S.wallTypes.filter(w=>uw.has(w.id)).forEach(w=>row(w.color,'square',w.name,'×'+Object.values(S.walls).filter(v=>v===w.id).length));}
   const up=new Set(S.icons.filter(i=>i.kind==='prop').map(i=>i.typeId));if(up.size&&L('props').vis){cy+=4;head('Props / Traps');S.propTypes.filter(p=>up.has(p.id)).forEach(p=>row(p.color,p.shape,p.name,'×'+S.icons.filter(i=>i.typeId===p.id).length));}
   const ug=new Set(S.icons.filter(i=>i.kind==='ghost').map(i=>i.typeId));if(ug.size&&L('ghosts').vis){cy+=4;head('Ghosts');S.ghostTypes.filter(g=>ug.has(g.id)).forEach(g=>row(g.color,null,g.name,'×'+S.icons.filter(i=>i.typeId===g.id).length,true));}
   if(S.paths.length&&L('paths').vis){cy+=4;head('Behavior');S.paths.forEach(p=>row(p.color,null,p.name,p.beh,true));}
@@ -956,6 +978,9 @@ function buildExports(){S.name=$('#levelName').value;
   const ghosts=S.icons.filter(i=>i.kind==='ghost').map(i=>{const t=lookupType(i);return{name:i.label||(t&&t.name)||'?',cx:Math.round(i.x/CELL-.5),cy:Math.round(i.y/CELL-.5)};});
   let spec=`CATCH ME / WOOO — LEVEL SPEC\nLevel: ${S.name}\nGrid: ${S.gw} x ${S.gh} cells (1 cell = 1 player tile)\nPlayer footprint: ${S.player.w} x ${S.player.h} cells\n\nROOMS (${rooms.length})\n`;
   rooms.forEach(r=>spec+=`  • ${r.name} — ${r.w}x${r.h} (~${r.area} cells) @ ${quadrant(r.cx,r.cy)}  ${r.color}\n`);
+  const wallCellCount=Object.keys(S.walls).length;
+  spec+=`\nWALLS (${wallCellCount} cells)\n`;
+  S.wallTypes.forEach(w=>{const n=Object.values(S.walls).filter(v=>v===w.id).length;if(n)spec+=`  • ${w.name} — ${n} cells  ${w.color}\n`;});
   spec+=`\nPROPS / TRAPS (${props.length})\n`;groupCount(props).forEach(g=>spec+=`  • ${g.name} ×${g.n}  @ ${g.list.map(p=>`(${p.cx},${p.cy})`).join(' ')}\n`);
   spec+=`\nGHOSTS (${ghosts.length})\n`;groupCount(ghosts).forEach(g=>spec+=`  • ${g.name} ×${g.n}  @ ${g.list.map(p=>`(${p.cx},${p.cy})`).join(' ')}\n`);
   spec+=`\nBEHAVIOR PATHS (${S.paths.length})\n`;S.paths.forEach(p=>spec+=`  • ${p.name} [${p.beh}] — ${p.points.map(pt=>`(${Math.round(pt.x/CELL-.5)},${Math.round(pt.y/CELL-.5)})`).join(' → ')}\n`);
