@@ -618,7 +618,15 @@ function applyCells(cells){cells.forEach(({cx,cy})=>{
   if(cx<0||cy<0||cx>=S.gw||cy>=S.gh)return;const k=cx+','+cy;
   if(tool==='zone'){if(L('zones').lock||!curZone)return;S.zones[k]=curZone;if(!L('walls').lock)delete S.walls[k];}
   else if(tool==='wall'){if(L('walls').lock)return;S.walls[k]=1;if(!L('zones').lock)delete S.zones[k];}
-  else if(tool==='erase'){if(!L('zones').lock)delete S.zones[k];if(!L('walls').lock)delete S.walls[k];}
+  else if(tool==='erase'){
+    if(!L('zones').lock)delete S.zones[k];
+    if(!L('walls').lock)delete S.walls[k];
+    S.icons=S.icons.filter(ic=>{
+      const lyr=ic.kind==='ghost'?'ghosts':'props';
+      if(L(lyr).lock)return true;
+      return Math.floor(ic.x/CELL)!==cx||Math.floor(ic.y/CELL)!==cy;
+    });
+  }
 });}
 
 /* ---------------- SNAP ---------------- */
