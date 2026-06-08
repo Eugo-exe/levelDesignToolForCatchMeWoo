@@ -239,14 +239,28 @@ input[type=range]{accent-color:var(--focus)}
 
 /* ---------- WELCOME SCREEN ---------- */
 #welcome{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:999}
-#welcomeBox{display:flex;flex-direction:column;align-items:center;gap:24px;padding:52px 64px;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);min-width:360px}
+#welcomeBox{display:flex;flex-direction:column;align-items:center;gap:20px;padding:44px 64px 40px;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);min-width:360px}
 #welcomeBox .wlogorow{display:flex;align-items:center;gap:10px;font-weight:700;font-size:21px}
 #welcomeBox .wlogorow .dot{width:14px;height:14px;border-radius:50%;background:var(--brand);box-shadow:0 0 14px var(--brand)}
 #welcomeBox .wlogorow b{color:var(--brand)}
 #welcomeBox .wsubtitle{font-size:11px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:var(--mute);margin-top:-8px}
 #welcomeBox .wdesc{font-size:12px;color:var(--dim);text-align:center;line-height:1.65;max-width:260px}
-#btnStart{margin-top:8px;padding:13px 56px;font-size:14px;font-weight:700;background:var(--brand);color:#fff;border-radius:7px;border:none;cursor:pointer;letter-spacing:.5px;box-shadow:0 4px 18px rgba(255,46,147,.35);transition:.15s}
+#welcomeBox .wmadeby{display:flex;align-items:center;gap:10px;margin-top:4px;border-top:1px solid var(--line);padding-top:16px;width:100%}
+#welcomeBox .wmadeby img{width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid var(--line)}
+#welcomeBox .wmadeby span{font-size:11px;color:var(--mute);line-height:1.5}
+#welcomeBox .wmadeby span b{color:var(--dim);display:block;font-size:12px}
+#btnStart{padding:13px 56px;font-size:14px;font-weight:700;background:var(--brand);color:#fff;border-radius:7px;border:none;cursor:pointer;letter-spacing:.5px;box-shadow:0 4px 18px rgba(255,46,147,.35);transition:.15s}
 #btnStart:hover{filter:brightness(1.12);transform:translateY(-1px);box-shadow:0 6px 22px rgba(255,46,147,.45)}
+#btnSupport{padding:8px 22px;font-size:12px;font-weight:600;background:transparent;color:var(--mute);border:1px solid var(--line);border-radius:6px;cursor:pointer;transition:.15s;margin-top:-6px}
+#btnSupport:hover{color:var(--fg);border-color:var(--dim)}
+/* ---------- SUPPORT POPUP ---------- */
+#supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:1100}
+#supportPopup.show{display:flex}
+#supportBox{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:36px 48px;display:flex;flex-direction:column;align-items:center;gap:18px;min-width:300px;text-align:center}
+#supportBox img{width:140px;height:140px;object-fit:contain}
+#supportBox .suptxt{font-size:14px;color:var(--fg);line-height:1.6;font-weight:500}
+#btnSupportOk{padding:10px 40px;font-size:13px;font-weight:700;background:var(--brand);color:#fff;border-radius:7px;border:none;cursor:pointer;box-shadow:0 4px 14px rgba(255,46,147,.3);transition:.15s}
+#btnSupportOk:hover{filter:brightness(1.12);transform:translateY(-1px)}
 #btnStart:active{transform:translateY(0);filter:brightness(1)}
 
 /* ---------- NAME WARNING ---------- */
@@ -495,6 +509,20 @@ input[type=range]{accent-color:var(--focus)}
     <div class="wsubtitle">Level Tool made by ไอภู</div>
     <div class="wdesc">ทำ Level Design กัน</div>
     <button id="btnStart">Start</button>
+    <button id="btnSupport">Need Support?</button>
+    <div class="wmadeby">
+      <img src="image/arraiWa.jpg" alt="maker">
+      <span><b>This web made by this guy.</b>ไอภู — Level Design Tool for Catch Me / Wooo</span>
+    </div>
+  </div>
+</div>
+
+<!-- Support popup -->
+<div id="supportPopup">
+  <div id="supportBox">
+    <img src="image/skeleton.gif" alt="skeleton">
+    <div class="suptxt">Walk to Pooh Table near P'TongTa</div>
+    <button id="btnSupportOk">Okay</button>
   </div>
 </div>
 
@@ -1485,6 +1513,8 @@ function resize(){DPR=Math.min(window.devicePixelRatio||1,2);cv.width=cv.clientW
 window.addEventListener('resize',resize);
 S=defaultState();buildTools();syncUI();fitView();draw();
 $('#btnStart').onclick=()=>{$('#welcome').style.display='none';};
+$('#btnSupport').onclick=()=>{$('#supportPopup').classList.add('show');};
+$('#btnSupportOk').onclick=()=>{$('#supportPopup').classList.remove('show');};
 $('#nameWarnOk').onclick=()=>{$('#nameWarn').classList.remove('show');$('#levelName').focus();};
 playerImg.onload=draw;
 requestAnimationFrame(()=>{resize();fitView();draw();});
