@@ -312,6 +312,12 @@ input[type=range]{accent-color:var(--focus)}
         <button data-d="90" title="Down ↓">↓</button>
         <input type="color" id="arrowColorPick" value="#ff2e93" title="Arrow color" style="width:28px;height:27px;padding:0;border:1px solid var(--line);border-radius:4px;cursor:pointer">
       </div>
+      <!-- Behavior zone drag-draw controls (shown when tool=bzone) -->
+      <div class="arrowdir hidden" id="bzoneCtl">
+        <input type="text" id="bzoneDrawName" placeholder="Zone name…" style="width:110px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:var(--panel);color:var(--fg);">
+        <input type="color" id="bzoneDrawColor" value="#ff7f3f" title="Zone color" style="width:28px;height:27px;padding:0;border:1px solid var(--line);border-radius:4px;cursor:pointer">
+        <span style="color:var(--mute);font-size:11px">drag rect on canvas</span>
+      </div>
     </div>
     <div class="hinttip" id="hintTip">scroll = zoom · space/right-drag = pan</div>
     <div id="zoomctl">
@@ -358,14 +364,8 @@ input[type=range]{accent-color:var(--focus)}
         </div>
         <div class="sec">
           <h4>Behavior Zones <span class="ln"></span></h4>
-          <input class="sec-search" id="srchBzone" placeholder="Filter zones…" autocomplete="off">
           <div id="bzoneList"></div>
-          <div class="addrow">
-            <input type="text" id="bzoneName" placeholder="e.g. Patrol Zone">
-            <input type="color" id="bzoneColor" value="#ff7f3f">
-            <button class="add" id="bzoneAdd">＋</button>
-          </div>
-          <div class="hint">Behavior zones overlay rooms without overriding them. Use <b>Z</b> tool.</div>
+          <div class="hint">Use <b>Z</b> key, then <b>drag a rectangle</b> on the canvas to create a zone. Select it with <b>V</b> to rename, recolor, and assign a ghost.</div>
         </div>
         <div class="sec">
           <h4>Walls <span class="ln"></span></h4>
@@ -557,12 +557,7 @@ function defaultState(){return{
     {id:'f_carpet',name:'Carpet',color:'#7a528a'},
     {id:'f_stone',name:'Stone Floor',color:'#666870'},
   ],
-  bzones:{}, bzoneTypes:[
-    {id:'bz_patrol',name:'Patrol Zone',color:'#ff7f3f'},
-    {id:'bz_fear',name:'Fear Zone',color:'#ff3f7f'},
-    {id:'bz_hide',name:'Hide Zone',color:'#7f3fff'},
-    {id:'bz_chase',name:'Chase Zone',color:'#ff3f3f'},
-  ],
+  bzoneAreas:[],
   arrows:[],
   layerOrder:['player','arrows','paths','ghosts','props','bzones','walls','floors','zones'],
   _seq:1,
@@ -608,7 +603,8 @@ function buildTools(){
   });
 }
 let paintMode='brush', brushSize=1;
-let curFloor=null, curBzone=null, arrowDir=0, arrowColor='#ff2e93';
+let curFloor=null, arrowDir=0, arrowColor='#ff2e93';
+let bzoneDrawColor='#ff7f3f', bzoneDrawName='', bzoneRectStart=null, bzoneRectCur=null;
 function setTool(id){
   tool=id;
   $$('.tool').forEach(b=>b.classList.toggle('active',b.dataset.id===id));
@@ -617,15 +613,17 @@ function setTool(id){
 }
 function updatePaintbar(){
   const pb=$('#paintbar');
-  const paintTools=['zone','floor','bzone','wall','erase'];
+  const paintTools=['zone','floor','wall','erase'];
   const arrowTool=tool==='arrow';
-  if(paintTools.includes(tool)||arrowTool){
+  const bzoneTool=tool==='bzone';
+  if(paintTools.includes(tool)||arrowTool||bzoneTool){
     pb.classList.remove('hidden');
-    $('#modeSeg').style.display=arrowTool?'none':'';
-    $('#szWrap').style.display=(arrowTool||paintMode!=='brush')?'none':'';
-    $('#curTarget').style.display=arrowTool?'none':'';
+    $('#modeSeg').style.display=(arrowTool||bzoneTool)?'none':'';
+    $('#szWrap').style.display=(arrowTool||bzoneTool||paintMode!=='brush')?'none':'';
+    $('#curTarget').style.display=(arrowTool||bzoneTool)?'none':'';
     $('#arrowCtl').classList.toggle('hidden',!arrowTool);
-    if(!arrowTool){
+    $('#bzoneCtl').classList.toggle('hidden',!bzoneTool);
+    if(!arrowTool&&!bzoneTool){
       $$('#modeSeg button').forEach(b=>{ b.style.display=(tool==='erase'&&b.dataset.m==='line')?'none':''; });
       if(tool==='erase'&&paintMode==='line')paintMode='brush';
       $$('#modeSeg button').forEach(b=>b.classList.toggle('active',b.dataset.m===paintMode));
@@ -633,7 +631,6 @@ function updatePaintbar(){
       const ct=$('#curTarget');
       if(tool==='zone'){const z=S.zoneTypes.find(z=>z.id===curZone);ct.innerHTML=z?`<span class="sw" style="background:${z.color}"></span>${z.name}`:'<span style="color:var(--mute)">pick a room →</span>';}
       else if(tool==='floor'){const f=(S.floorTypes||[]).find(f=>f.id===curFloor);ct.innerHTML=f?`<span class="sw" style="background:${f.color}"></span>${f.name}`:'<span style="color:var(--mute)">pick a floor →</span>';}
-      else if(tool==='bzone'){const bz=(S.bzoneTypes||[]).find(b=>b.id===curBzone);ct.innerHTML=bz?`<span class="sw" style="background:${bz.color}"></span>${bz.name}`:'<span style="color:var(--mute)">pick a behavior zone →</span>';}
       else if(tool==='wall'){const wt=S.wallTypes&&S.wallTypes.find(w=>w.id===curWall);ct.innerHTML=wt?`<span class="sw" style="background:${wt.color}"></span>${wt.name}`:'<span style="color:var(--mute)">pick a wall →</span>';}
       else ct.innerHTML='<span style="color:var(--red)">Erasing</span>';
     }
@@ -644,6 +641,9 @@ $('#brushSz').oninput=e=>{brushSize=+e.target.value;$('#brushSzV').textContent=b
 // Arrow paintbar direction buttons
 $$('#arrowCtl button[data-d]').forEach(b=>b.onclick=()=>{arrowDir=+b.dataset.d;$$('#arrowCtl button[data-d]').forEach(x=>x.classList.toggle('active',+x.dataset.d===arrowDir));});
 $('#arrowColorPick').oninput=e=>{arrowColor=e.target.value;};
+// Bzone paintbar
+$('#bzoneDrawColor').oninput=e=>{bzoneDrawColor=e.target.value;};
+$('#bzoneDrawName').oninput=e=>{bzoneDrawName=e.target.value;};
 
 /* selection / current */
 let sel=null, activePathId=null, curZone=null, curWall=null, curPlace=null;
@@ -685,10 +685,41 @@ function draw(){
       for(const k in S.floors||{}){const[cx,cy]=k.split(',').map(Number);if(cx<vx0||cx>vx1||cy<vy0||cy>vy1)continue;
         const ft=(S.floorTypes||[]).find(f=>f.id===S.floors[k]);if(!ft)continue;ctx.fillStyle=hexA(ft.color,.50);ctx.fillRect(cx*CELL,cy*CELL,CELL,CELL);}
     }else if(lk==='bzones'&&L('bzones').vis){
-      for(const k in S.bzones||{}){const[cx,cy]=k.split(',').map(Number);if(cx<vx0||cx>vx1||cy<vy0||cy>vy1)continue;
-        const bzt=(S.bzoneTypes||[]).find(b=>b.id===S.bzones[k]);if(!bzt)continue;
-        ctx.fillStyle=hexA(bzt.color,.28);ctx.fillRect(cx*CELL,cy*CELL,CELL,CELL);
-        ctx.strokeStyle=hexA(bzt.color,.75);ctx.lineWidth=1.5/cam.scale;ctx.setLineDash([4,3]);ctx.strokeRect(cx*CELL+1,cy*CELL+1,CELL-2,CELL-2);ctx.setLineDash([]);}
+      for(const bz of (S.bzoneAreas||[])){
+        const rx=bz.cx*CELL,ry=bz.cy*CELL,rw=bz.cw*CELL,rh=bz.ch*CELL;
+        const isSel=sel&&sel.type==='bzoneArea'&&sel.id===bz.id;
+        ctx.fillStyle=hexA(bz.color,.28);ctx.fillRect(rx,ry,rw,rh);
+        ctx.strokeStyle=hexA(bz.color,.8);ctx.lineWidth=(isSel?2.5:1.5)/cam.scale;
+        ctx.setLineDash([5,4]);ctx.strokeRect(rx,ry,rw,rh);ctx.setLineDash([]);
+        // label
+        const lbl=bz.name||(bz.ghostId?'':'Zone');
+        ctx.font=`bold ${12/cam.scale}px sans-serif`;ctx.textAlign='left';ctx.textBaseline='top';
+        ctx.fillStyle=hexA(bz.color,.9);ctx.fillText(lbl,rx+4/cam.scale,ry+4/cam.scale);
+        // ghost badge
+        if(bz.ghostId){const gh=S.icons.find(i=>i.id===bz.ghostId);
+          if(gh){const gt=lookupType(gh);ctx.save();
+            ctx.font=`${10/cam.scale}px sans-serif`;ctx.textAlign='right';ctx.textBaseline='top';
+            ctx.fillStyle='rgba(255,255,255,.7)';
+            const gl=gh.label||(gt&&gt.name)||'?';
+            ctx.fillText('👻 '+gl,rx+rw-4/cam.scale,ry+4/cam.scale);ctx.restore();}}
+        if(isSel){
+          ctx.strokeStyle='#007acc';ctx.lineWidth=2/cam.scale;ctx.setLineDash([]);
+          ctx.strokeRect(rx-2/cam.scale,ry-2/cam.scale,rw+4/cam.scale,rh+4/cam.scale);
+          // resize handle (bottom-right)
+          const hx=rx+rw,hy=ry+rh;
+          ctx.fillStyle='#007acc';ctx.fillRect(hx-6/cam.scale,hy-6/cam.scale,12/cam.scale,12/cam.scale);
+          ctx.strokeStyle='#fff';ctx.lineWidth=1/cam.scale;
+          ctx.strokeRect(hx-6/cam.scale,hy-6/cam.scale,12/cam.scale,12/cam.scale);}
+      }
+      // preview rect while dragging new bzone
+      if(tool==='bzone'&&bzoneRectStart&&bzoneRectCur){
+        const x0=Math.min(bzoneRectStart.cx,bzoneRectCur.cx)*CELL;
+        const y0=Math.min(bzoneRectStart.cy,bzoneRectCur.cy)*CELL;
+        const x1=(Math.max(bzoneRectStart.cx,bzoneRectCur.cx)+1)*CELL;
+        const y1=(Math.max(bzoneRectStart.cy,bzoneRectCur.cy)+1)*CELL;
+        ctx.fillStyle=hexA(bzoneDrawColor,.25);ctx.fillRect(x0,y0,x1-x0,y1-y0);
+        ctx.strokeStyle=hexA(bzoneDrawColor,.85);ctx.lineWidth=2/cam.scale;
+        ctx.setLineDash([5,4]);ctx.strokeRect(x0,y0,x1-x0,y1-y0);ctx.setLineDash([]);}
     }else if(lk==='walls'&&L('walls').vis){
       for(const k in S.walls){const[cx,cy]=k.split(',').map(Number);if(cx<vx0||cx>vx1||cy<vy0||cy>vy1)continue;
         const _wt=S.wallTypes&&S.wallTypes.find(w=>w.id===S.walls[k]);
@@ -710,18 +741,17 @@ function draw(){
   if(S.opts.labels&&L('zones').vis)drawZoneLabels();
 
   // paint preview (line/rect)
-  if(painting&&paintMode!=='brush'&&paintStart&&paintCur){
+  if(painting&&paintMode!=='brush'&&paintStart&&paintCur&&tool!=='bzone'){
     const cells=computePaintCells();
     let col=tool==='zone'?(curZone?hexA((S.zoneTypes.find(z=>z.id===curZone)||{}).color||'#888',.5):'rgba(120,120,120,.4)'):
             tool==='floor'?(curFloor?hexA(((S.floorTypes||[]).find(f=>f.id===curFloor)||{}).color||'#888',.5):'rgba(120,120,120,.4)'):
-            tool==='bzone'?(curBzone?hexA(((S.bzoneTypes||[]).find(b=>b.id===curBzone)||{}).color||'#888',.4):'rgba(120,120,120,.4)'):
             tool==='wall'?hexA((S.wallTypes&&S.wallTypes.find(w=>w.id===curWall)||{color:S.wallColor}).color,.6):'rgba(244,135,113,.4)';
     ctx.fillStyle=col;cells.forEach(c=>{if(c.cx>=0&&c.cy>=0&&c.cx<S.gw&&c.cy<S.gh)ctx.fillRect(c.cx*CELL,c.cy*CELL,CELL,CELL);});
   }
   // hover
-  if(hoverCell&&(tool==='zone'||tool==='floor'||tool==='bzone'||tool==='wall'||tool==='erase'||tool==='icon'||tool==='arrow')&&!(painting&&paintMode!=='brush')){
+  if(hoverCell&&(tool==='zone'||tool==='floor'||tool==='wall'||tool==='erase'||tool==='icon'||tool==='arrow')&&!(painting&&paintMode!=='brush')){
     ctx.lineWidth=2/cam.scale;ctx.strokeStyle='rgba(0,122,204,.9)';
-    if((tool==='zone'||tool==='floor'||tool==='bzone'||tool==='wall'||tool==='erase')&&paintMode==='brush'&&brushSize>1){
+    if((tool==='zone'||tool==='floor'||tool==='wall'||tool==='erase')&&paintMode==='brush'&&brushSize>1){
       const half=Math.floor(brushSize/2);ctx.strokeRect((hoverCell.cx-half)*CELL+1,(hoverCell.cy-half)*CELL+1,brushSize*CELL-2,brushSize*CELL-2);
     } else ctx.strokeRect(hoverCell.cx*CELL+1,hoverCell.cy*CELL+1,CELL-2,CELL-2);
   }
@@ -819,12 +849,10 @@ function applyCells(cells){cells.forEach(({cx,cy})=>{
   if(cx<0||cy<0||cx>=S.gw||cy>=S.gh)return;const k=cx+','+cy;
   if(tool==='zone'){if(L('zones').lock||!curZone)return;S.zones[k]=curZone;if(!L('walls').lock)delete S.walls[k];}
   else if(tool==='floor'){if(L('floors').lock||!curFloor)return;S.floors[k]=curFloor;}
-  else if(tool==='bzone'){if(L('bzones').lock||!curBzone)return;S.bzones[k]=curBzone;}
   else if(tool==='wall'){if(L('walls').lock||!curWall)return;S.walls[k]=curWall;if(!L('zones').lock)delete S.zones[k];}
   else if(tool==='erase'){
     if(!L('zones').lock)delete S.zones[k];
     if(!L('floors').lock)delete S.floors[k];
-    if(!L('bzones').lock)delete S.bzones[k];
     if(!L('walls').lock)delete S.walls[k];
     S.icons=S.icons.filter(ic=>{
       const lyr=ic.kind==='ghost'?'ghosts':'props';
@@ -853,10 +881,14 @@ cv.addEventListener('mousedown',e=>{
     if(hit){dragging=true;dragStart={w,orig:cloneSelPos(hit),snap:snap()};}
     syncInspect();draw();return;
   }
-  if(tool==='zone'||tool==='floor'||tool==='bzone'||tool==='wall'||tool==='erase'){
+  if(tool==='zone'||tool==='floor'||tool==='wall'||tool==='erase'){
     if(paintMode==='brush'){pushUndo();painting=true;applyCells(brushCells(cell));draw();}
     else{painting=true;paintStart=cell;paintCur=cell;draw();}
     return;
+  }
+  if(tool==='bzone'){
+    if(L('bzones').lock){toast('Behavior Zones layer is locked');return;}
+    bzoneRectStart=cell;bzoneRectCur=cell;painting=true;draw();return;
   }
   if(tool==='arrow'){
     if(L('arrows').lock){toast('Arrows layer is locked');return;}
@@ -887,6 +919,7 @@ window.addEventListener('mousemove',e=>{
       cv.style.cursor=(Math.abs(w.x-hx)<8/cam.scale&&Math.abs(w.y-hy)<8/cam.scale)?'se-resize':'default';}
   }
   if(panning){cam.x=dragStart.cx+(m.x-dragStart.mx);cam.y=dragStart.cy+(m.y-dragStart.my);draw();return;}
+  if(painting&&tool==='bzone'){bzoneRectCur=cell;draw();return;}
   if(painting){if(paintMode==='brush'){if(hoverCell)applyCells(brushCells(hoverCell));}else{paintCur=cell;}draw();return;}
   if(dragging&&sel){dragMovedObj=true;
     if(sel.type==='resize'){
@@ -894,33 +927,62 @@ window.addEventListener('mousemove',e=>{
         const rawW=(w.x-dragStart.orig.x)*2/CELL,rawH=(w.y-dragStart.orig.y)*2/CELL;
         ic.w=Math.max(0.5,Math.round(rawW*2)/2);ic.h=Math.max(0.5,Math.round(rawH*2)/2);
         syncInspect();}draw();return;}
+    if(sel.type==='bzoneResize'){
+      const bz=(S.bzoneAreas||[]).find(b=>b.id===sel.id);if(bz){
+        const dc=w2cell(w.x,w.y);
+        bz.cw=Math.max(1,dc.cx-bz.cx+1);bz.ch=Math.max(1,dc.cy-bz.cy+1);
+        syncInspect();}draw();return;}
     let nx=dragStart.orig.x+(w.x-dragStart.w.x),ny=dragStart.orig.y+(w.y-dragStart.w.y);
     if(shiftDown){const sp=snapPoint(nx,ny);nx=sp.x;ny=sp.y;}
     if(sel.type==='icon'){const ic=S.icons.find(i=>i.id===sel.id);ic.x=nx;ic.y=ny;}
     else if(sel.type==='node'){const p=S.paths.find(x=>x.id===sel.id);p.points[sel.idx]={x:nx,y:ny};}
     else if(sel.type==='player'){S.player.x=nx/CELL;S.player.y=ny/CELL;}
     else if(sel.type==='arrow'){const ar=(S.arrows||[]).find(a=>a.id===sel.id);if(ar){ar.x=nx;ar.y=ny;}}
+    else if(sel.type==='bzoneArea'){const bz=(S.bzoneAreas||[]).find(b=>b.id===sel.id);if(bz){
+      bz.cx=Math.max(0,Math.round(nx/CELL));bz.cy=Math.max(0,Math.round(ny/CELL));}}
     draw();return;}
   if(tool==='zone'||tool==='wall'||tool==='erase'||tool==='icon')draw();
 });
 window.addEventListener('mouseup',()=>{
-  if(painting&&paintMode!=='brush'&&paintStart){pushUndo();applyCells(computePaintCells());refreshLists();}
+  if(painting&&tool==='bzone'&&bzoneRectStart&&bzoneRectCur){
+    const cx=Math.min(bzoneRectStart.cx,bzoneRectCur.cx);
+    const cy=Math.min(bzoneRectStart.cy,bzoneRectCur.cy);
+    const cw=Math.abs(bzoneRectCur.cx-bzoneRectStart.cx)+1;
+    const ch=Math.abs(bzoneRectCur.cy-bzoneRectStart.cy)+1;
+    pushUndo();
+    const nm=bzoneDrawName.trim()||('Zone '+(( S.bzoneAreas||[]).length+1));
+    S.bzoneAreas=S.bzoneAreas||[];
+    const newBz={id:uid('bz'),name:nm,color:bzoneDrawColor,cx,cy,cw,ch,ghostId:null};
+    S.bzoneAreas.push(newBz);
+    sel={type:'bzoneArea',id:newBz.id};
+    refreshLists();syncInspect();
+  } else if(painting&&paintMode!=='brush'&&paintStart){pushUndo();applyCells(computePaintCells());refreshLists();}
   if(dragging&&dragMovedObj&&dragStart&&dragStart.snap){undoStack.push(dragStart.snap);if(undoStack.length>80)undoStack.shift();redoStack.length=0;syncInspect();}
-  painting=false;paintStart=null;paintCur=null;dragging=false;
+  painting=false;paintStart=null;paintCur=null;bzoneRectStart=null;bzoneRectCur=null;dragging=false;
   if(panning){panning=false;cv.style.cursor=tool==='pan'?'grab':(tool==='select'?'default':'crosshair');}
   draw();
 });
 
 function hitTest(w){
-  // Check resize handle first (only when icon is selected)
+  // Check resize handle first (icon or bzoneArea)
   if(sel&&(sel.type==='icon'||sel.type==='resize')){
     const ic=S.icons.find(i=>i.id===sel.id);
     if(ic){const sw=ic.w||1,sh=ic.h||1;const hx=ic.x+sw*CELL/2+2,hy=ic.y+sh*CELL/2+2;
       if(Math.abs(w.x-hx)<8/cam.scale&&Math.abs(w.y-hy)<8/cam.scale)return{type:'resize',id:ic.id};}
   }
+  if(sel&&(sel.type==='bzoneArea'||sel.type==='bzoneResize')){
+    const bz=(S.bzoneAreas||[]).find(b=>b.id===sel.id);
+    if(bz){const hx=(bz.cx+bz.cw)*CELL,hy=(bz.cy+bz.ch)*CELL;
+      if(Math.abs(w.x-hx)<8/cam.scale&&Math.abs(w.y-hy)<8/cam.scale)return{type:'bzoneResize',id:bz.id};}
+  }
   if(L('paths').vis&&!L('paths').lock)for(const p of S.paths)for(let i=0;i<p.points.length;i++){const pt=p.points[i];if(Math.hypot(pt.x-w.x,pt.y-w.y)<11/cam.scale+7)return{type:'node',id:p.id,idx:i};}
   // Arrows
   if(L('arrows').vis&&!L('arrows').lock){for(const ar of (S.arrows||[])){if(Math.hypot(ar.x-w.x,ar.y-w.y)<CELL*0.45)return{type:'arrow',id:ar.id};}}
+  // Behavior zone areas
+  if(L('bzones').vis&&!L('bzones').lock){
+    for(let i=(S.bzoneAreas||[]).length-1;i>=0;i--){const bz=S.bzoneAreas[i];
+      if(w.x>=bz.cx*CELL&&w.x<=(bz.cx+bz.cw)*CELL&&w.y>=bz.cy*CELL&&w.y<=(bz.cy+bz.ch)*CELL)return{type:'bzoneArea',id:bz.id};}
+  }
   for(let i=S.icons.length-1;i>=0;i--){const ic=S.icons[i];const lyr=ic.kind==='ghost'?'ghosts':'props';if(!L(lyr).vis||L(lyr).lock)continue;
     const sw=ic.w||1,sh=ic.h||1;if(w.x>ic.x-sw*CELL/2&&w.x<ic.x+sw*CELL/2&&w.y>ic.y-sh*CELL/2&&w.y<ic.y+sh*CELL/2)return{type:'icon',id:ic.id};}
   if(S.player.show&&L('player').vis&&!L('player').lock){const px=S.player.x*CELL,py=S.player.y*CELL,pw=S.player.w*CELL,ph=S.player.h*CELL;if(w.x>px-pw/2&&w.x<px+pw/2&&w.y>py-ph/2&&w.y<py+ph/2)return{type:'player'};}
@@ -931,6 +993,8 @@ function cloneSelPos(h){if(h.type==='icon'){const ic=S.icons.find(i=>i.id===h.id
   if(h.type==='player')return{x:S.player.x*CELL,y:S.player.y*CELL};
   if(h.type==='resize'){const ic=S.icons.find(i=>i.id===h.id);return{x:ic.x,y:ic.y,w:ic.w||1,h:ic.h||1};}
   if(h.type==='arrow'){const ar=(S.arrows||[]).find(a=>a.id===h.id);return{x:ar.x,y:ar.y};}
+  if(h.type==='bzoneArea'){const bz=(S.bzoneAreas||[]).find(b=>b.id===h.id);return{x:bz.cx*CELL,y:bz.cy*CELL,cx:bz.cx,cy:bz.cy,cw:bz.cw,ch:bz.ch};}
+  if(h.type==='bzoneResize'){const bz=(S.bzoneAreas||[]).find(b=>b.id===h.id);return{x:(bz.cx+bz.cw)*CELL,y:(bz.cy+bz.ch)*CELL,cx:bz.cx,cy:bz.cy,cw:bz.cw,ch:bz.ch};}
   return{x:0,y:0};}
 
 /* keyboard */
@@ -959,15 +1023,16 @@ function deleteSel(){if(!sel)return;
   else if(sel.type==='node'){const p=S.paths.find(x=>x.id===sel.id);if(p)p.points.splice(sel.idx,1);refreshLists();}
   else if(sel.type==='player'){S.player.show=false;$('#showPlayer').checked=false;}
   else if(sel.type==='arrow')S.arrows=(S.arrows||[]).filter(a=>a.id!==sel.id);
-  sel=null;syncInspect();draw();}
+  else if(sel.type==='bzoneArea'||sel.type==='bzoneResize')S.bzoneAreas=(S.bzoneAreas||[]).filter(b=>b.id!==sel.id);
+  sel=null;syncInspect();refreshLists();draw();}
 
 /* ---------------- PALETTE UI ---------------- */
 let listDragSrc=null;
 function getListArr(k){
-  if(k==='zones')return S.zoneTypes;if(k==='floors')return S.floorTypes||[];if(k==='bzones')return S.bzoneTypes||[];
+  if(k==='zones')return S.zoneTypes;if(k==='floors')return S.floorTypes||[];
   if(k==='walls')return S.wallTypes;if(k==='props')return S.propTypes;if(k==='ghosts')return S.ghostTypes;if(k==='paths')return S.paths;return [];}
 function setListArr(k,arr){
-  if(k==='zones')S.zoneTypes=arr;else if(k==='floors')S.floorTypes=arr;else if(k==='bzones')S.bzoneTypes=arr;
+  if(k==='zones')S.zoneTypes=arr;else if(k==='floors')S.floorTypes=arr;
   else if(k==='walls')S.wallTypes=arr;else if(k==='props')S.propTypes=arr;else if(k==='ghosts')S.ghostTypes=arr;else if(k==='paths')S.paths=arr;}
 
 function makeChip(item,listKey,opts){
@@ -1028,12 +1093,20 @@ function refreshLists(){
     f=>{curFloor=f.id;setTool('floor');refreshLists();},
     f=>{pushUndo();S.floorTypes=S.floorTypes.filter(x=>x.id!==f.id);if(curFloor===f.id)curFloor=null;refreshLists();},
     {round:false,meta:'',isSelected:f=>curFloor===f.id});
-  // Behavior zones
-  S.bzoneTypes=S.bzoneTypes||[];
-  buildListSection($('#bzoneList'),S.bzoneTypes,'bzones','Bzone',
-    bz=>{curBzone=bz.id;setTool('bzone');refreshLists();},
-    bz=>{pushUndo();S.bzoneTypes=S.bzoneTypes.filter(x=>x.id!==bz.id);if(curBzone===bz.id)curBzone=null;refreshLists();},
-    {round:false,meta:'',isSelected:bz=>curBzone===bz.id});
+  // Behavior zone areas (placed instances, not types)
+  const bzl=$('#bzoneList');bzl.innerHTML='';
+  (S.bzoneAreas||[]).forEach(bz=>{
+    const gh=bz.ghostId?S.icons.find(i=>i.id===bz.ghostId):null;
+    const gt=gh?lookupType(gh):null;
+    const ghName=gh?(gh.label||(gt&&gt.name)||'?'):'—';
+    const isSel=sel&&(sel.type==='bzoneArea'||sel.type==='bzoneResize')&&sel.id===bz.id;
+    const el=document.createElement('div');el.className='chip'+(isSel?' sel':'');
+    el.innerHTML=`<span class="sw" style="background:${bz.color}"></span><span class="nm">${bz.name}</span><span class="meta" style="font-size:10px">${ghName}</span><button class="x" title="Remove">✕</button>`;
+    el.onclick=ev=>{if(ev.target.classList.contains('x'))return;sel={type:'bzoneArea',id:bz.id};syncInspect();draw();refreshLists();};
+    el.querySelector('.x').onclick=ev=>{ev.stopPropagation();pushUndo();S.bzoneAreas=(S.bzoneAreas||[]).filter(x=>x.id!==bz.id);if(sel&&sel.id===bz.id){sel=null;syncInspect();}refreshLists();draw();};
+    bzl.appendChild(el);
+  });
+  if(!(S.bzoneAreas||[]).length)bzl.innerHTML='<div style="color:var(--mute);font-size:11px;padding:4px 6px">No zones yet. Drag with Z tool.</div>';
   // Walls
   buildListSection($('#wallList'),S.wallTypes,'walls','Wall',
     w=>{curWall=w.id;setTool('wall');refreshLists();},
@@ -1060,13 +1133,12 @@ function refreshLists(){
 $('#wallAdd').onclick=()=>{const n=$('#wallName').value.trim();if(!n)return;pushUndo();S.wallTypes.push({id:uid('w'),name:n,color:$('#wallColor').value});$('#wallName').value='';refreshLists();};
 $('#zoneAdd').onclick=()=>{const n=$('#zoneName').value.trim();if(!n)return;pushUndo();S.zoneTypes.push({id:uid('z'),name:n,color:$('#zoneColor').value});$('#zoneName').value='';refreshLists();};
 $('#floorAdd').onclick=()=>{const n=$('#floorName').value.trim();if(!n)return;pushUndo();S.floorTypes=S.floorTypes||[];S.floorTypes.push({id:uid('f'),name:n,color:$('#floorColor').value});$('#floorName').value='';refreshLists();};
-$('#bzoneAdd').onclick=()=>{const n=$('#bzoneName').value.trim();if(!n)return;pushUndo();S.bzoneTypes=S.bzoneTypes||[];S.bzoneTypes.push({id:uid('bz'),name:n,color:$('#bzoneColor').value});$('#bzoneName').value='';refreshLists();};
 $('#propAdd').onclick=()=>{const n=$('#propName').value.trim();if(!n)return;pushUndo();S.propTypes.push({id:uid('p'),name:n,color:$('#propColor').value,shape:$('#propShape').value});$('#propName').value='';refreshLists();};
 $('#ghostAdd').onclick=()=>{const n=$('#ghostName').value.trim();if(!n)return;pushUndo();S.ghostTypes.push({id:uid('g'),name:n,color:$('#ghostColor').value});$('#ghostName').value='';refreshLists();};
 $('#pathAdd').onclick=()=>{const n=$('#pathName').value.trim()||('Path '+(S.paths.length+1));pushUndo();const p={id:uid('pa'),name:n,color:$('#pathColor').value,beh:$('#pathBeh').value,points:[]};S.paths.push(p);activePathId=p.id;setTool('path');$('#pathName').value='';refreshLists();toast('Path "'+n+'" active — click map');};
-[['wallName','wallAdd'],['zoneName','zoneAdd'],['floorName','floorAdd'],['bzoneName','bzoneAdd'],['propName','propAdd'],['ghostName','ghostAdd'],['pathName','pathAdd']].forEach(([i,b])=>$('#'+i)&&$('#'+i).addEventListener('keydown',e=>{if(e.key==='Enter')$('#'+b).click();}));
+[['wallName','wallAdd'],['zoneName','zoneAdd'],['floorName','floorAdd'],['propName','propAdd'],['ghostName','ghostAdd'],['pathName','pathAdd']].forEach(([i,b])=>$('#'+i)&&$('#'+i).addEventListener('keydown',e=>{if(e.key==='Enter')$('#'+b).click();}));
 // Search filter handlers
-['Zone','Floor','Bzone','Wall','Prop','Ghost','Path'].forEach(k=>$('#srch'+k)&&$('#srch'+k).addEventListener('input',refreshLists));
+['Zone','Floor','Wall','Prop','Ghost','Path'].forEach(k=>$('#srch'+k)&&$('#srch'+k).addEventListener('input',refreshLists));
 
 /* ---------------- LAYERS UI ---------------- */
 const EYE=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
@@ -1077,7 +1149,7 @@ const LAYER_INFO={zones:'Rooms / Zones',floors:'Floors',bzones:'Behavior Zones',
 const DEFAULT_LAYER_ORDER=['player','arrows','paths','ghosts','props','bzones','walls','floors','zones'];
 function layerCount(k){
   if(k==='zones')return Object.keys(S.zones).length;if(k==='floors')return Object.keys(S.floors||{}).length;
-  if(k==='bzones')return Object.keys(S.bzones||{}).length;if(k==='walls')return Object.keys(S.walls).length;
+  if(k==='bzones')return (S.bzoneAreas||[]).length;if(k==='walls')return Object.keys(S.walls).length;
   if(k==='props')return S.icons.filter(i=>i.kind==='prop').length;if(k==='ghosts')return S.icons.filter(i=>i.kind==='ghost').length;
   if(k==='paths')return S.paths.length;if(k==='arrows')return (S.arrows||[]).length;if(k==='player')return S.player.show?1:0;return 0;}
 let layerDragSrc=null;
@@ -1133,12 +1205,23 @@ function syncInspect(){const box=$('#inspector');
     $('#arColor').oninput=e=>{ar.color=e.target.value;draw();};
     $('#arDel').onclick=()=>{pushUndo();deleteSel();};
     box.querySelectorAll('[data-dd]').forEach(b=>b.onclick=()=>{ar.angle=+b.dataset.dd;syncInspect();draw();});
+  } else if(sel.type==='bzoneArea'||sel.type==='bzoneResize'){
+    const bzid=sel.id;const bz=(S.bzoneAreas||[]).find(b=>b.id===bzid);if(!bz){sel=null;return syncInspect();}
+    const ghosts=S.icons.filter(i=>i.kind==='ghost');
+    const ghostOpts=ghosts.map(g=>{const gt=lookupType(g);const lbl=g.label||(gt&&gt.name)||g.id;return`<option value="${g.id}"${bz.ghostId===g.id?' selected':''}>${lbl}</option>`;}).join('');
+    box.innerHTML=`<div class="ihead"><span class="sw" style="background:${bz.color}"></span><span class="it">${bz.name||'Zone'}</span><span class="ik">BEHAVIOR ZONE · ${bz.cw}×${bz.ch} cells</span></div>
+      <div class="irow"><input type="text" id="bzName" value="${(bz.name||'').replace(/"/g,'&quot;')}" placeholder="Zone name"><input type="color" id="bzColor" value="${bz.color}" style="width:30px;height:30px;padding:0;border-radius:4px"><button class="del" id="bzDel">Delete</button></div>
+      <div class="irow"><label style="font-size:11px;color:var(--mute)">Assign Ghost:</label><select id="bzGhost" style="flex:1;padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:var(--panel);color:var(--fg)"><option value="">— none —</option>${ghostOpts}</select></div>`;
+    $('#bzName').oninput=e=>{bz.name=e.target.value;refreshLists();draw();};
+    $('#bzColor').oninput=e=>{bz.color=e.target.value;refreshLists();draw();};
+    $('#bzDel').onclick=()=>{pushUndo();S.bzoneAreas=(S.bzoneAreas||[]).filter(x=>x.id!==bzid);sel=null;refreshLists();syncInspect();draw();};
+    $('#bzGhost').onchange=e=>{bz.ghostId=e.target.value||null;refreshLists();draw();};
   }
   updStatus();
 }
 function updStatus(){
   $('#stMode').textContent=(TOOLS.find(t=>t.id===tool)||{}).name+((tool==='zone'||tool==='wall'||tool==='erase')?' · '+paintMode:'');
-  let s='';if(sel){s=sel.type==='icon'?'icon selected':sel.type==='node'?'waypoint selected':sel.type==='arrow'?'arrow selected':sel.type==='resize'?'resize icon':'player selected';}
+  let s='';if(sel){s=sel.type==='icon'?'icon selected':sel.type==='node'?'waypoint selected':sel.type==='arrow'?'arrow selected':sel.type==='resize'?'resize icon':sel.type==='bzoneArea'||sel.type==='bzoneResize'?'behavior zone selected':'player selected';}
   $('#stSel').textContent=s;
 }
 
@@ -1182,7 +1265,7 @@ $('#fileInput').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new 
 function loadState(o){const d=defaultState();S=Object.assign(d,o);
   S.zones=o.zones||{};S.walls=o.walls||{};S.icons=o.icons||[];S.paths=o.paths||[];
   S.floors=o.floors||{};S.floorTypes=o.floorTypes||d.floorTypes;
-  S.bzones=o.bzones||{};S.bzoneTypes=o.bzoneTypes||d.bzoneTypes;
+  S.bzoneAreas=o.bzoneAreas||[];
   S.arrows=o.arrows||[];
   S.layerOrder=o.layerOrder||[...DEFAULT_LAYER_ORDER];
   S.wallTypes=o.wallTypes||d.wallTypes;
@@ -1195,8 +1278,8 @@ function loadState(o){const d=defaultState();S=Object.assign(d,o);
   S.opts=Object.assign({grid:true,labels:true,wpnums:true,legend:true},o.opts||{});
   S.layers=Object.assign(JSON.parse(JSON.stringify(d.layers)),o.layers||{});
   S.wallColor=o.wallColor||d.wallColor;S.labelColor=o.labelColor||d.labelColor;S.labelSize=o.labelSize||d.labelSize;S.labelFont=o.labelFont||d.labelFont;
-  sel=null;activePathId=null;curZone=null;curFloor=null;curBzone=null;curPlace=null;undoStack=[];redoStack=[];fitView();syncUI();draw();}
-$('#btnNew').onclick=()=>{if(confirm('Clear everything and start a new level?')){S=defaultState();sel=null;activePathId=null;curZone=null;curFloor=null;curBzone=null;curPlace=null;undoStack=[];redoStack=[];fitView();syncUI();draw();}};
+  sel=null;activePathId=null;curZone=null;curFloor=null;curPlace=null;undoStack=[];redoStack=[];fitView();syncUI();draw();}
+$('#btnNew').onclick=()=>{if(confirm('Clear everything and start a new level?')){S=defaultState();sel=null;activePathId=null;curZone=null;curFloor=null;curPlace=null;undoStack=[];redoStack=[];fitView();syncUI();draw();}};
 function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 
 /* ---------------- PNG EXPORT (×2) ---------------- */
@@ -1240,10 +1323,13 @@ function renderLayout(o){const lw=S.gw*CELL,lh=S.gh*CELL;
 }
 function renderBehavior(o){
   renderBaseBoard(o);
-  // behavior zones overlay
-  for(const k in S.bzones||{}){const[cx,cy]=k.split(',').map(Number);const bzt=(S.bzoneTypes||[]).find(b=>b.id===S.bzones[k]);if(!bzt)continue;
-    o.fillStyle=hexA(bzt.color,.30);o.fillRect(cx*CELL,cy*CELL,CELL,CELL);
-    o.strokeStyle=hexA(bzt.color,.80);o.lineWidth=1.5;o.setLineDash([4,3]);o.strokeRect(cx*CELL+1,cy*CELL+1,CELL-2,CELL-2);o.setLineDash([]);}
+  // behavior zone rect areas overlay
+  for(const bz of (S.bzoneAreas||[])){
+    const rx=bz.cx*CELL,ry=bz.cy*CELL,rw=bz.cw*CELL,rh=bz.ch*CELL;
+    o.fillStyle=hexA(bz.color,.30);o.fillRect(rx,ry,rw,rh);
+    o.strokeStyle=hexA(bz.color,.85);o.lineWidth=2;o.setLineDash([5,4]);o.strokeRect(rx,ry,rw,rh);o.setLineDash([]);
+    o.font=`bold 12px ${FF.ui}`;o.textAlign='left';o.textBaseline='top';
+    o.fillStyle=hexA(bz.color,.9);o.fillText(bz.name||'Zone',rx+5,ry+5);}
   // walls (dim)
   for(const k in S.walls){const[cx,cy]=k.split(',').map(Number);const _wt=S.wallTypes&&S.wallTypes.find(w=>w.id===S.walls[k]);o.fillStyle=_wt?hexA(_wt.color,.6):hexA(S.wallColor,.6);o.fillRect(cx*CELL,cy*CELL,CELL,CELL);}
   if(S.opts.labels)renderLabels(o);
@@ -1290,7 +1376,7 @@ function drawBehaviorLegend(o,x,y,w){o.textAlign='left';o.textBaseline='middle';
   const head=t=>{o.fillStyle='#6e7681';o.font='700 11px '+FF.mono;o.fillText(t.toUpperCase(),x,cy);cy+=22;};
   const row=(color,name,meta,round)=>{const r=8;if(round){o.beginPath();o.arc(x+10,cy,r,0,7);}else o.fillRect(x+10-r,cy-r,r*2,r*2);o.fillStyle=color;o.fill();
     o.fillStyle='#d4d4d4';o.font='600 12px '+FF.ui;o.fillText(name,x+28,cy);if(meta){o.fillStyle='#6e7681';o.font='400 10px '+FF.mono;o.textAlign='right';o.fillText(meta,x+w,cy);o.textAlign='left';}cy+=24;};
-  const ubz=new Set(Object.values(S.bzones||{}));if(ubz.size){head('Behavior Zones');(S.bzoneTypes||[]).filter(b=>ubz.has(b.id)).forEach(b=>row(b.color,b.name,'×'+Object.values(S.bzones||{}).filter(v=>v===b.id).length,false));}
+  if((S.bzoneAreas||[]).length){head('Behavior Zones');(S.bzoneAreas||[]).forEach(b=>{const gh=b.ghostId?S.icons.find(i=>i.id===b.ghostId):null;const gt=gh?lookupType(gh):null;const ghLbl=gh?(gh.label||(gt&&gt.name)||''):null;row(b.color,b.name,ghLbl?'→ '+ghLbl:'',false);});}
   const ug=new Set(S.icons.filter(i=>i.kind==='ghost').map(i=>i.typeId));if(ug.size){cy+=4;head('Ghosts');S.ghostTypes.filter(g=>ug.has(g.id)).forEach(g=>row(g.color,g.name,'×'+S.icons.filter(i=>i.typeId===g.id).length,true));}
   if(S.paths.length){cy+=4;head('Behavior');S.paths.forEach(p=>row(p.color,p.name,p.beh,true));}
   if((S.arrows||[]).length){cy+=4;head('Arrows');o.fillStyle='#d4d4d4';o.font='600 12px '+FF.ui;o.fillText(`${S.arrows.length} direction markers`,x,cy);}
@@ -1321,6 +1407,8 @@ function buildExports(){S.name=$('#levelName').value;
   S.wallTypes.forEach(w=>{const n=Object.values(S.walls).filter(v=>v===w.id).length;if(n)spec+=`  • ${w.name} — ${n} cells  ${w.color}\n`;});
   spec+=`\nPROPS / TRAPS (${props.length})\n`;groupCount(props).forEach(g=>spec+=`  • ${g.name} ×${g.n}  @ ${g.list.map(p=>`(${p.cx},${p.cy})`).join(' ')}\n`);
   spec+=`\nGHOSTS (${ghosts.length})\n`;groupCount(ghosts).forEach(g=>spec+=`  • ${g.name} ×${g.n}  @ ${g.list.map(p=>`(${p.cx},${p.cy})`).join(' ')}\n`);
+  const bzAreas=S.bzoneAreas||[];spec+=`\nBEHAVIOR ZONES (${bzAreas.length})\n`;
+  bzAreas.forEach(b=>{const gh=b.ghostId?S.icons.find(i=>i.id===b.ghostId):null;const gt=gh?lookupType(gh):null;const ghLbl=gh?(' → '+(gh.label||(gt&&gt.name)||'?')):'';spec+=`  • ${b.name} — ${b.cw}x${b.ch} @ (${b.cx},${b.cy})${ghLbl}  ${b.color}\n`;});
   spec+=`\nBEHAVIOR PATHS (${S.paths.length})\n`;S.paths.forEach(p=>spec+=`  • ${p.name} [${p.beh}] — ${p.points.map(pt=>`(${Math.round(pt.x/CELL-.5)},${Math.round(pt.y/CELL-.5)})`).join(' → ')}\n`);
   const roomPhrase=rooms.map(r=>`${r.name.toLowerCase()} (${quadrant(r.cx,r.cy)}, ~${r.w}x${r.h} tiles)`).join(', ');
   const propPhrase=groupCount(props).map(g=>`${g.n>1?g.n+'x ':''}${g.name.toLowerCase()}`).join(', ');
